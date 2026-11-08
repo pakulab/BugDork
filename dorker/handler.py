@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import asyncio
+import os
+import random
+import sys
+
+import httpx
+
+from dorker import __version__
+from dorker.cli import build_parser, parse_args
+from dorker.config import ensure_config, load_keys
+from dorker.core.client import CSEClient
+from dorker.core.dorker import Dorker
+from dorker.core.keypool import KeyPool
+from dorker.exceptions import InputError, NoKeysError
+from dorker.logging import Logger, stderr
+from dorker.meta.updater import self_update
+from dorker.meta.version import check_latest
+from dorker.models import RunConfig
+from dorker.output import OutputWriter
+from dorker.ui.banner import banner
+
+
+def _read_lines(path: str) -> list[str]:
+    """Blocking read — run via asyncio.to_thread."""
+    with open(path, encoding="utf-8") as f:
+        return [ln.strip() for ln in f if ln.strip()]
+
+
+def _read_list(path: str) -> list[str]:
+    if not os.path.isfile(path):
+        raise InputError(f"List file not found: {path}")
+    with open(path, encoding="utf-8") as f:
+        out = [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]
+    if not out:
+        raise InputError(f"No dorks in {path}")
+    return out
+
+
+async def _read_stdin() -> list[str]:
+    if sys.stdin.isatty():
+        raise InputError("No input provided. Use -q, -l, or pipe dorks via stdin.")
+    lines = [ln.strip() for ln in sys.stdin if ln.strip()]
+    if not lines:
+        raise InputError("Empty stdin input.")
+    return lines
+
+
+async def _print_version(cfg: RunConfig) -> None:
+    if cfg.silent:
+        return
+    latest = await check_latest()
+    if latest is None:
+        Logger("Unable to determine latest version.", "verbose")
+        return
+    status = "latest" if latest == __version__ else "outdated"
+    Logger(f"bugdork {__version__} ({status}, latest={latest})", "info")
+
+
+async def _resolve_proxy(cfg: RunConfig) -> str | None:
+    proxy = cfg.proxy
+    if cfg.proxy_file:
+        try:
+            pool = await asyncio.to_thread(_read_lines, cfg.proxy_file)
+            if pool:
+                proxy = random.choice(pool)
+        except OSError as e:
+            Logger(f"proxy-file error: {e}", "warn")
+    return proxy
+
+
+async def run() -> int:
+    cfg = parse_args()
+
+    if cfg.help:
+        stderr(banner())
+        build_parser().print_help()
+        return 0
+
+    if not cfg.silent:
+        stderr(banner())
+        await _print_version(cfg)
+
+    if cfg.update:
+        latest = await check_latest()
+        if latest and latest == __version__:
+            Logger("Already on latest version.", "info")
+            return 0
+        return await self_update(yes=False)
+
+    # Input
+    if cfg.query:
+        dorks = [cfg.query]
+    elif cfg.list_file:
+        dorks = await asyncio.to_thread(_read_list, cfg.list_file)
+    else:
+        dorks = await _read_stdin()
+
+    # Config + keys
+    path = ensure_config(cfg.config_path)
+    keys = await load_keys(path)
+    if not keys:
+        raise NoKeysError("No API keys configured.")
+
+    # Proxy
+    proxy = await _resolve_proxy(cfg)
+
+    limits = httpx.Limits(
+        max_connections=cfg.threads * 2,
+        max_keepalive_connections=cfg.threads,
+    )
+
+    async with httpx.AsyncClient(
+        proxy=proxy,
+        verify=True,
+        timeout=httpx.Timeout(cfg.timeout),
+        limits=limits,
+        max_redirects=30,
+    ) as http:
+        client = CSEClient(http, cfg.timeout, cfg.max_retries, cfg.delay, cfg.verbose)
+        pool = KeyPool(keys)
+        dorker = Dorker(client, pool, cfg)
+        results = await dorker.run(dorks)
+
+    # Output
+    if cfg.output:
+        writer = OutputWriter(cfg.output, cfg.fmt)
+        await writer.write(results)
+        total = sum(len(r.urls) for r in results)
+        Logger(f"Saved {total} URL(s) to {cfg.output}", "info")
+    else:
+        for r in results:
+            for u in r.urls:
+                print(u)
+
+    return 0 if any(r.urls for r in results) else 1

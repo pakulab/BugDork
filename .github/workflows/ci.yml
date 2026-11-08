@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker compose build test
+
+      - name: Run tests
+        run: docker compose run --rm test
+
+      - name: Lint
+        run: docker compose run --rm lint
