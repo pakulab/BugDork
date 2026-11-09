@@ -15,6 +15,36 @@ def build_parser() -> argparse.ArgumentParser:
         description="BugDork - Google dorking for ethical hackers",
     )
     p.add_argument("-q", "--query", type=str)
+    p.add_argument(
+        "-T",
+        "--target",
+        type=str,
+        help="Target domain for authorized URL reconnaissance",
+    )
+    p.add_argument(
+        "--recon",
+        action="store_true",
+        help="Run passive URL discovery; add --active for live Katana crawl",
+    )
+    p.add_argument(
+        "--urls-only",
+        action="store_true",
+        help="Collect URLs from passive sources only",
+    )
+    p.add_argument(
+        "--filter",
+        dest="filter_pattern",
+        type=str,
+        help="Regex to filter an existing URL list (-l)",
+    )
+    p.add_argument(
+        "--active",
+        action="store_true",
+        help="Enable live Katana crawl (requires typed confirmation)",
+    )
+    p.add_argument("--tool-mode", choices=["auto", "docker", "local"], default="auto")
+    p.add_argument("--include-subdomains", action="store_true")
+    p.add_argument("--max-urls", type=int, default=10000)
     p.add_argument("-l", "--list", dest="list_file", type=str)
     p.add_argument("-o", "--output", type=str)
     p.add_argument(
@@ -43,6 +73,12 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
         Logger("Invalid arguments. Run 'bugdork -h' for usage.", "warn")
         sys.exit(2)
 
+    if ns.max_urls < 1:
+        Logger("--max-urls must be >= 1", "warn")
+        sys.exit(2)
+    if ns.active and not (ns.recon and ns.target):
+        Logger("--active requires --recon and --target", "warn")
+        sys.exit(2)
     if ns.threads < 1:
         Logger("--threads must be >= 1", "warn")
         sys.exit(2)
@@ -70,4 +106,12 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
         verbose=ns.verbose,
         silent=ns.silent,
         help=ns.help,
+        target=ns.target,
+        recon=ns.recon,
+        urls_only=ns.urls_only,
+        filter_pattern=ns.filter_pattern,
+        active=ns.active,
+        tool_mode=ns.tool_mode,
+        include_subdomains=ns.include_subdomains,
+        max_urls=ns.max_urls,
     )

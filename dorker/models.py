@@ -36,3 +36,11 @@ class RunConfig:
     verbose: bool = False
     silent: bool = False
     help: bool = False
+    target: str | None = None
+    recon: bool = False
+    urls_only: bool = False
+    filter_pattern: str | None = None
+    active: bool = False
+    tool_mode: str = "auto"
+    include_subdomains: bool = False
+    max_urls: int = 10000

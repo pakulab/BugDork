@@ -19,6 +19,9 @@ from dorker.meta.updater import self_update
 from dorker.meta.version import check_latest
 from dorker.models import RunConfig
 from dorker.output import OutputWriter
+from dorker.recon.common import normalize_target
+from dorker.recon.filter import filter_file
+from dorker.recon.runner import run_recon
 from dorker.ui.banner import banner
 
 
@@ -88,6 +91,65 @@ async def run() -> int:
             Logger("Already on latest version.", "info")
             return 0
         return await self_update(yes=False)
+
+    # Recon and URL filtering are independent of Google CSE credentials.
+    if cfg.urls_only or cfg.recon:
+        if not cfg.target:
+            raise InputError("Recon requires -T/--target example.com.")
+        target = normalize_target(cfg.target)
+        active = bool(cfg.active)
+        if active:
+            Logger(
+                "ACTIVE Katana crawl sends requests to the live target. "
+                "Use only with explicit authorization.",
+                "warn",
+            )
+            # Gunakan asyncio.to_thread untuk elak block async event loop
+            confirmation = (
+                (
+                    await asyncio.to_thread(
+                        input, f"Type '{target}' to confirm active crawl: "
+                    )
+                )
+                .strip()
+                .lower()
+            )
+            if confirmation != target:
+                Logger("Confirmation mismatch; active crawl cancelled.", "warn")
+                return 2
+        output = cfg.output or os.path.join(
+            "output", f"{target.replace('.', '_')}_urls.{cfg.fmt}"
+        )
+        urls = await asyncio.to_thread(
+            run_recon,
+            target,
+            output=output,
+            fmt=cfg.fmt,
+            active=active,
+            include_subdomains=cfg.include_subdomains,
+            tool_mode=cfg.tool_mode,
+            max_urls=cfg.max_urls,
+        )
+        Logger(f"Recon complete: {len(urls)} in-scope URL(s) saved to {output}", "info")
+        return 0 if urls else 1
+
+    if cfg.filter_pattern:
+        if not cfg.list_file:
+            raise InputError("--filter requires -l/--list URL file.")
+        matches = await asyncio.to_thread(
+            filter_file, cfg.list_file, cfg.filter_pattern
+        )
+        if cfg.output:
+            writer = OutputWriter(cfg.output, cfg.fmt)
+            from dorker.models import DorkResult
+
+            await writer.write([DorkResult(dork=cfg.filter_pattern, urls=matches)])
+            Logger(f"Saved {len(matches)} matching URL(s) to {cfg.output}", "info")
+        else:
+            for url in matches:
+                print(url)
+            Logger(f"Matched {len(matches)} URL(s)", "info")
+        return 0 if matches else 1
 
     # Input
     if cfg.query:

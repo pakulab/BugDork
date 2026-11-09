@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "BugDork"
 dynamic = ["version"]
-description = "BugDork - Google dorking for ethical hackers"
+description = "BugDork Omni-Recon — Google CSE dorking and authorized OSINT URL discovery"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Paku"}]
 dependencies = [
@@ -47,7 +47,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "PERF", "FA", "BLE"]
