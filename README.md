@@ -133,3 +133,5 @@ Docker test suite:
 ```bash
 docker compose run --rm test
 ```
+
+© 2026 Paku. (SymphoeniX Clanz) All rights reserved.
